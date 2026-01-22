@@ -192,7 +192,9 @@ class WanAnimate:
         if dit_fsdp:
             model = shard_fn(model, use_lora=use_lora)
         else:
-            if convert_model_dtype:
+            # On MPS, always convert model to param_dtype for consistency
+            # to avoid dtype mismatches in matrix operations
+            if convert_model_dtype or self.device.type == 'mps':
                 model.to(self.param_dtype)
             if not self.init_on_cpu:
                 model.to(self.device)
@@ -481,7 +483,8 @@ class WanAnimate:
             if max_seq_len % self.sp_size != 0:
                 raise ValueError(f"max_seq_len {max_seq_len} is not divisible by sp_size {self.sp_size}")
 
-            autocast_dtype = torch.bfloat16 if self.device.type != 'mps' else torch.float32
+            # Use param_dtype for autocast (already optimal per device)
+            autocast_dtype = self.param_dtype
             with (
                 torch.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=(self.device.type != 'cpu')),
                 torch.no_grad()

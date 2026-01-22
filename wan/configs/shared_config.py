@@ -9,12 +9,13 @@ from ..utils.device import is_mps_available, get_device_type
 wan_shared_cfg = EasyDict()
 
 # Determine optimal dtype based on device
-# MPS doesn't fully support bfloat16, use float16 or float32 instead
+# MPS doesn't fully support bfloat16, use float32 for stability
 def get_optimal_dtype():
     """Get the optimal dtype for the current device."""
     if is_mps_available() and get_device_type() == 'mps':
-        # MPS works better with float16 or float32
-        return torch.float16
+        # MPS requires float32 for stable matrix operations
+        # float16 can cause dtype mismatches in matmul accumulator
+        return torch.float32
     return torch.bfloat16
 
 # t5

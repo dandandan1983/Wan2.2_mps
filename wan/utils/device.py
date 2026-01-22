@@ -165,13 +165,13 @@ def get_device_type_from_tensor(tensor):
     return tensor.device.type
 
 
-def autocast(dtype=torch.float32, device_type=None):
+def autocast(dtype=None, device_type=None):
     """
     Device-agnostic autocast context manager.
     Uses the best available device if device_type is not specified.
     
     Args:
-        dtype: Data type for autocast
+        dtype: Data type for autocast. If None, uses the optimal dtype for the device.
         device_type: Optional device type string ('cuda', 'mps', 'cpu')
         
     Returns:
@@ -179,6 +179,15 @@ def autocast(dtype=torch.float32, device_type=None):
     """
     if device_type is None:
         device_type = get_device_type()
+    
+    # If no dtype specified, use the optimal dtype for the device to ensure consistency
+    if dtype is None:
+        dtype = get_optimal_dtype()
+    
+    # For MPS, ensure we use float32 for stability in matrix operations
+    if device_type == 'mps' and dtype == torch.bfloat16:
+        dtype = torch.float32
+    
     return torch.amp.autocast(device_type=device_type, dtype=dtype)
 
 
@@ -217,7 +226,8 @@ def get_optimal_dtype(device: torch.device = None) -> torch.dtype:
     """
     Get the optimal dtype for the given device.
     
-    MPS doesn't fully support bfloat16, so use float16 or float32 instead.
+    MPS requires float32 for stable matrix operations - float16/bfloat16
+    can cause dtype mismatches in matmul accumulator.
     CUDA works best with bfloat16 on supported hardware.
     
     Args:
@@ -232,8 +242,9 @@ def get_optimal_dtype(device: torch.device = None) -> torch.dtype:
         device_type = device.type if isinstance(device, torch.device) else str(device).split(':')[0]
     
     if device_type == 'mps':
-        # MPS has limited bfloat16 support, use float16
-        return torch.float16
+        # MPS requires float32 for stable matrix operations
+        # float16 can cause dtype mismatches in matmul accumulator
+        return torch.float32
     elif device_type == 'cuda':
         # Check if CUDA device supports bfloat16
         if torch.cuda.is_available():

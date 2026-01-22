@@ -162,7 +162,9 @@ class WanI2V:
         if dit_fsdp:
             model = shard_fn(model)
         else:
-            if convert_model_dtype:
+            # On MPS, always convert model to param_dtype for consistency
+            # to avoid dtype mismatches in matrix operations
+            if convert_model_dtype or self.device.type == 'mps':
                 model.to(self.param_dtype)
             if not self.init_on_cpu:
                 model.to(self.device)
@@ -330,8 +332,8 @@ class WanI2V:
         no_sync_high_noise = getattr(self.high_noise_model, 'no_sync',
                                      noop_no_sync)
 
-        # evaluation mode
-        autocast_dtype = self.param_dtype if self.device.type != 'mps' else torch.float32
+        # evaluation mode - use param_dtype for autocast (already optimal per device)
+        autocast_dtype = self.param_dtype
         with (
                 torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=(self.device.type != 'cpu')),
                 torch.no_grad(),
