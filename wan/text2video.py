@@ -15,6 +15,7 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from .distributed.fsdp import shard_model
+from .utils.device import get_best_device, get_device_type, is_cuda_available, is_mps_available, synchronize, empty_cache
 from .distributed.sequence_parallel import sp_attn_forward, sp_dit_forward
 from .distributed.util import get_world_size
 from .modules.model import WanModel
@@ -69,7 +70,7 @@ class WanT2V:
                 Convert DiT model parameters dtype to 'config.param_dtype'.
                 Only works without FSDP.
         """
-        self.device = torch.device(f"cuda:{device_id}")
+        self.device = get_best_device(device_id)
         self.config = config
         self.rank = rank
         self.t5_cpu = t5_cpu
@@ -190,9 +191,8 @@ class WanT2V:
             required_model_name = 'low_noise_model'
             offload_model_name = 'high_noise_model'
         if offload_model or self.init_on_cpu:
-            if next(getattr(
-                    self,
-                    offload_model_name).parameters()).device.type == 'cuda':
+            offload_device_type = next(getattr(self, offload_model_name).parameters()).device.type
+            if offload_device_type in ('cuda', 'mps'):
                 getattr(self, offload_model_name).to('cpu')
             if next(getattr(
                     self,
@@ -297,8 +297,9 @@ class WanT2V:
                                      noop_no_sync)
 
         # evaluation mode
+        autocast_dtype = self.param_dtype if self.device.type != 'mps' else torch.float32
         with (
-                torch.amp.autocast('cuda', dtype=self.param_dtype),
+                torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=(self.device.type != 'cpu')),
                 torch.no_grad(),
                 no_sync_low_noise(),
                 no_sync_high_noise(),
@@ -363,7 +364,7 @@ class WanT2V:
             if offload_model:
                 self.low_noise_model.cpu()
                 self.high_noise_model.cpu()
-                torch.cuda.empty_cache()
+                empty_cache()
             if self.rank == 0:
                 videos = self.vae.decode(x0)
 
@@ -371,7 +372,7 @@ class WanT2V:
         del sample_scheduler
         if offload_model:
             gc.collect()
-            torch.cuda.synchronize()
+            synchronize()
         if dist.is_initialized():
             dist.barrier()
 

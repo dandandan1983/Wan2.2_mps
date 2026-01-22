@@ -16,6 +16,7 @@ from decord import VideoReader
 from tqdm import tqdm
 import torch.nn.functional as F
 from .distributed.fsdp import shard_model
+from .utils.device import get_best_device, get_device_type, is_cuda_available, is_mps_available, synchronize, empty_cache
 from .distributed.sequence_parallel import sp_attn_forward, sp_dit_forward
 from .distributed.util import get_world_size
 
@@ -77,7 +78,7 @@ class WanAnimate:
             use_relighting_lora (`bool`, *optional*, defaults to False):
                Whether to use relighting lora for character replacement. 
         """
-        self.device = torch.device(f"cuda:{device_id}")
+        self.device = get_best_device(device_id)
         self.config = config
         self.rank = rank
         self.t5_cpu = t5_cpu
@@ -223,7 +224,9 @@ class WanAnimate:
         return target_len
 
 
-    def get_i2v_mask(self, lat_t, lat_h, lat_w, mask_len=1, mask_pixel_values=None, device="cuda"):
+    def get_i2v_mask(self, lat_t, lat_h, lat_w, mask_len=1, mask_pixel_values=None, device=None):
+        if device is None:
+            device = self.device
         if mask_pixel_values is None:
             msk = torch.zeros(1, (lat_t-1) * 4 + 1, lat_h, lat_w, device=device)
         else:
@@ -478,8 +481,9 @@ class WanAnimate:
             if max_seq_len % self.sp_size != 0:
                 raise ValueError(f"max_seq_len {max_seq_len} is not divisible by sp_size {self.sp_size}")
 
+            autocast_dtype = torch.bfloat16 if self.device.type != 'mps' else torch.float32
             with (
-                torch.autocast(device_type=str(self.device), dtype=torch.bfloat16, enabled=True),
+                torch.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=(self.device.type != 'cpu')),
                 torch.no_grad()
             ):
                 if sample_solver == 'unipc':

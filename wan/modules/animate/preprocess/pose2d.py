@@ -22,8 +22,11 @@ class SimpleOnnxInference(object):
         if isinstance(device, str):
             device = torch.device(device)
         if device.type == 'cuda':
-            device = '{}:{}'.format(device.type, device.index)
+            device = '{}:{}'.format(device.type, device.index if device.index is not None else 0)
             providers = [("CUDAExecutionProvider", {"device_id": device[-1:] if device[-1] in [str(_i) for _i in range(10)] else "0"}), "CPUExecutionProvider"]
+        elif device.type == 'mps':
+            # MPS is not supported by ONNX Runtime, fall back to CPU
+            providers = ["CPUExecutionProvider"]
         else:
             providers = ["CPUExecutionProvider"]
         self.device = device
@@ -57,8 +60,11 @@ class SimpleOnnxInference(object):
         if isinstance(device, str):
             device = torch.device(device)
         if device.type == 'cuda':
-            device = '{}:{}'.format(device.type, device.index)
+            device = '{}:{}'.format(device.type, device.index if device.index is not None else 0)
             providers = [("CUDAExecutionProvider", {"device_id": device[-1:] if device[-1] in [str(_i) for _i in range(10)] else "0"}), "CPUExecutionProvider"]
+        elif device.type == 'mps':
+            # MPS is not supported by ONNX Runtime, fall back to CPU
+            providers = ["CPUExecutionProvider"]
         else:
             providers = ["CPUExecutionProvider"]
         self.session.set_providers(providers)

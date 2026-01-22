@@ -22,6 +22,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from .distributed.fsdp import shard_model
+from .utils.device import get_best_device, get_device_type, is_cuda_available, is_mps_available, synchronize, empty_cache
 from .distributed.sequence_parallel import sp_attn_forward, sp_dit_forward
 from .distributed.util import get_world_size
 from .modules.s2v.audio_encoder import AudioEncoder
@@ -85,7 +86,7 @@ class WanS2V:
                 Convert DiT model parameters dtype to 'config.param_dtype'.
                 Only works without FSDP.
         """
-        self.device = torch.device(f"cuda:{device_id}")
+        self.device = get_best_device(device_id)
         self.config = config
         self.rank = rank
         self.t5_cpu = t5_cpu
@@ -533,8 +534,9 @@ class WanS2V:
 
         out = []
         # evaluation mode
+        autocast_dtype = self.param_dtype if self.device.type != 'mps' else torch.float32
         with (
-                torch.amp.autocast('cuda', dtype=self.param_dtype),
+                torch.amp.autocast(device_type=self.device.type, dtype=autocast_dtype, enabled=(self.device.type != 'cpu')),
                 torch.no_grad(),
         ):
             for r in range(num_repeat):
@@ -612,7 +614,7 @@ class WanS2V:
                     }
                 if offload_model or self.init_on_cpu:
                     self.noise_model.to(self.device)
-                    torch.cuda.empty_cache()
+                    empty_cache()
 
                 for i, t in enumerate(tqdm(timesteps)):
                     latent_model_input = latents[0:1]
@@ -643,8 +645,8 @@ class WanS2V:
 
                 if offload_model:
                     self.noise_model.cpu()
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
+                    synchronize()
+                    empty_cache()
                 latents = torch.stack(latents)
                 if not (drop_first_motion and r == 0):
                     decode_latents = torch.cat([motion_latents, latents], dim=2)
@@ -672,7 +674,7 @@ class WanS2V:
         del sample_scheduler
         if offload_model:
             gc.collect()
-            torch.cuda.synchronize()
+            synchronize()
         if dist.is_initialized():
             dist.barrier()
 

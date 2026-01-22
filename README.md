@@ -100,6 +100,32 @@ pip install -r requirements.txt
 pip install -r requirements_s2v.txt
 ```
 
+#### Apple Silicon (MPS) Support
+
+This repository includes support for Apple Silicon Macs using Metal Performance Shaders (MPS). MPS provides GPU acceleration on macOS devices with Apple Silicon (M1, M2, M3, etc.) or AMD GPUs.
+
+**Requirements for MPS:**
+- macOS 12.3 or later
+- PyTorch 2.0 or later with MPS support
+- Apple Silicon (M1/M2/M3) or compatible AMD GPU
+
+**Notes for MPS users:**
+- MPS will be automatically detected and used when CUDA is not available
+- Some features have limitations on MPS:
+  - Distributed training (FSDP, multi-GPU) is not supported on MPS
+  - Flash Attention is not available on MPS (standard attention is used)
+  - bfloat16 is not fully supported on MPS; float32 is used for autocast
+- ONNX-based preprocessing (pose detection) falls back to CPU on MPS
+- Memory management differs from CUDA; monitor Activity Monitor for memory usage
+
+**Example usage on Mac:**
+```sh
+# The script will automatically detect MPS and use it
+python generate.py --task ti2v-5B --size 1280*704 --ckpt_dir ./Wan2.2-TI2V-5B --offload_model True --t5_cpu --prompt "A cat playing piano"
+```
+
+> 💡 For best performance on Apple Silicon, use the TI2V-5B model which is designed to run on consumer-grade hardware.
+
 
 #### Model Download
 

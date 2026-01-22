@@ -77,9 +77,15 @@ def load_video_frames(
     for n, img_path in enumerate(tqdm(img_paths, desc="frame loading (JPEG)")):
         images[n], video_height, video_width = _load_img_as_tensor(img_path, image_size)
     if not offload_video_to_cpu:
-        images = images.cuda()
-        img_mean = img_mean.cuda()
-        img_std = img_std.cuda()
+        # Support CUDA, MPS, or stay on CPU
+        if torch.cuda.is_available():
+            images = images.cuda()
+            img_mean = img_mean.cuda()
+            img_std = img_std.cuda()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            images = images.to('mps')
+            img_mean = img_mean.to('mps')
+            img_std = img_std.to('mps')
     # normalize by mean and std
     images -= img_mean
     images /= img_std
@@ -111,9 +117,15 @@ def load_video_frames_v2(
     for n, frame in enumerate(tqdm(frames, desc="video frame")):
         images[n], video_height, video_width = _load_img_v2_as_tensor(frame, image_size)
     if not offload_video_to_cpu:
-        images = images.cuda()
-        img_mean = img_mean.cuda()
-        img_std = img_std.cuda()
+        # Support CUDA, MPS, or stay on CPU
+        if torch.cuda.is_available():
+            images = images.cuda()
+            img_mean = img_mean.cuda()
+            img_std = img_std.cuda()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            images = images.to('mps')
+            img_mean = img_mean.to('mps')
+            img_std = img_std.to('mps')
     # normalize by mean and std
     images -= img_mean
     images /= img_std

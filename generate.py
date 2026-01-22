@@ -19,6 +19,7 @@ from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, SUPPORTED_SIZES, WAN_CON
 from wan.distributed.util import init_distributed_group
 from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import merge_video_audio, save_video, str2bool
+from wan.utils.device import get_device_type, is_cuda_available, is_mps_available, synchronize
 
 
 EXAMPLE_PROMPT = {
@@ -317,13 +318,18 @@ def generate(args):
     world_size = int(os.getenv("WORLD_SIZE", 1))
     local_rank = int(os.getenv("LOCAL_RANK", 0))
     device = local_rank
+    device_type = get_device_type()
     _init_logging(rank)
 
     if args.offload_model is None:
         args.offload_model = False if world_size > 1 else True
         logging.info(
             f"offload_model is not specified, set to {args.offload_model}.")
+    
+    # Check for MPS vs CUDA for distributed training
     if world_size > 1:
+        if not is_cuda_available():
+            raise RuntimeError("Distributed training requires CUDA. MPS does not support distributed training.")
         torch.cuda.set_device(local_rank)
         dist.init_process_group(
             backend="nccl",
@@ -337,6 +343,14 @@ def generate(args):
         assert not (
             args.ulysses_size > 1
         ), f"sequence parallel are not supported in non-distributed environments."
+        
+        # Log the device being used
+        if device_type == 'mps':
+            logging.info("Using Apple MPS (Metal Performance Shaders) for acceleration.")
+        elif device_type == 'cuda':
+            logging.info(f"Using CUDA device: {torch.cuda.get_device_name(device)}")
+        else:
+            logging.info("Using CPU for computation.")
 
     if args.ulysses_size > 1:
         assert args.ulysses_size == world_size, f"The number of ulysses_size should be equal to the world size."
@@ -562,7 +576,7 @@ def generate(args):
                 merge_video_audio(video_path=args.save_file, audio_path="tts.wav")
     del video
 
-    torch.cuda.synchronize()
+    synchronize()
     if dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()
