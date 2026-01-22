@@ -19,6 +19,8 @@ __all__ = [
     'get_device_type_from_tensor',
     'empty_cache',
     'synchronize',
+    'get_optimal_dtype',
+    'get_generator',
 ]
 
 
@@ -207,3 +209,73 @@ def log_device_info():
         logging.info("Using Apple MPS (Metal Performance Shaders) device")
     else:
         logging.info("Using CPU device")
+
+
+def get_optimal_dtype(device: torch.device = None) -> torch.dtype:
+    """
+    Get the optimal dtype for the given device.
+    
+    MPS doesn't fully support bfloat16, so use float16 or float32 instead.
+    CUDA works best with bfloat16 on supported hardware.
+    
+    Args:
+        device: Target device (if None, uses best available)
+        
+    Returns:
+        torch.dtype: The optimal dtype for the device
+    """
+    if device is None:
+        device_type = get_device_type()
+    else:
+        device_type = device.type if isinstance(device, torch.device) else str(device).split(':')[0]
+    
+    if device_type == 'mps':
+        # MPS has limited bfloat16 support, use float16
+        return torch.float16
+    elif device_type == 'cuda':
+        # Check if CUDA device supports bfloat16
+        if torch.cuda.is_available():
+            capability = torch.cuda.get_device_capability()
+            if capability[0] >= 8:  # Ampere and newer
+                return torch.bfloat16
+            else:
+                return torch.float16
+        return torch.bfloat16
+    else:
+        # CPU - bfloat16 is fine
+        return torch.bfloat16
+
+
+def get_generator(device: torch.device = None, seed: int = None) -> torch.Generator:
+    """
+    Create a random number generator for the specified device.
+    
+    Note: MPS generator support varies by PyTorch version.
+    
+    Args:
+        device: Target device
+        seed: Random seed (optional)
+        
+    Returns:
+        torch.Generator: A generator for the device
+    """
+    if device is None:
+        device = get_best_device()
+    
+    device_type = device.type if isinstance(device, torch.device) else str(device).split(':')[0]
+    
+    # Create generator - MPS may need CPU generator for some operations
+    if device_type == 'mps':
+        # MPS generator support was added in PyTorch 2.0
+        # For older versions, fall back to CPU generator
+        try:
+            gen = torch.Generator(device=device)
+        except RuntimeError:
+            gen = torch.Generator(device='cpu')
+    else:
+        gen = torch.Generator(device=device)
+    
+    if seed is not None:
+        gen.manual_seed(seed)
+    
+    return gen

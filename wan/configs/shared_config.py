@@ -2,16 +2,28 @@
 import torch
 from easydict import EasyDict
 
+# Import device utilities
+from ..utils.device import is_mps_available, get_device_type
+
 #------------------------ Wan shared config ------------------------#
 wan_shared_cfg = EasyDict()
 
+# Determine optimal dtype based on device
+# MPS doesn't fully support bfloat16, use float16 or float32 instead
+def get_optimal_dtype():
+    """Get the optimal dtype for the current device."""
+    if is_mps_available() and get_device_type() == 'mps':
+        # MPS works better with float16 or float32
+        return torch.float16
+    return torch.bfloat16
+
 # t5
 wan_shared_cfg.t5_model = 'umt5_xxl'
-wan_shared_cfg.t5_dtype = torch.bfloat16
+wan_shared_cfg.t5_dtype = get_optimal_dtype()
 wan_shared_cfg.text_len = 512
 
 # transformer
-wan_shared_cfg.param_dtype = torch.bfloat16
+wan_shared_cfg.param_dtype = get_optimal_dtype()
 
 # inference
 wan_shared_cfg.num_train_timesteps = 1000

@@ -1,6 +1,8 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import torch
 
+from ..utils.device import get_device_type, is_mps_available, is_cuda_available
+
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
@@ -18,7 +20,75 @@ import warnings
 __all__ = [
     'flash_attention',
     'attention',
+    'sdp_attention',
 ]
+
+
+def sdp_attention(
+    q,
+    k,
+    v,
+    q_lens=None,
+    k_lens=None,
+    dropout_p=0.,
+    softmax_scale=None,
+    q_scale=None,
+    causal=False,
+    window_size=(-1, -1),
+    deterministic=False,
+    dtype=torch.float32,
+):
+    """
+    Scaled dot-product attention for MPS and CPU devices.
+    Uses PyTorch's native scaled_dot_product_attention.
+    
+    q:              [B, Lq, Nq, C1].
+    k:              [B, Lk, Nk, C1].
+    v:              [B, Lk, Nk, C2]. Nq must be divisible by Nk.
+    q_lens:         [B].
+    k_lens:         [B].
+    dropout_p:      float. Dropout probability.
+    softmax_scale:  float. The scaling of QK^T before applying softmax.
+    causal:         bool. Whether to apply causal attention mask.
+    window_size:    (left right). If not (-1, -1), apply sliding window local attention.
+    deterministic:  bool. If True, slightly slower and uses more memory.
+    dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
+    """
+    device_type = q.device.type
+    out_dtype = q.dtype
+    
+    # For MPS, use float32 for better stability; for CPU/CUDA use the specified dtype
+    if device_type == 'mps':
+        compute_dtype = torch.float32
+    else:
+        compute_dtype = dtype if dtype in (torch.float16, torch.bfloat16, torch.float32) else torch.float32
+    
+    if q_lens is not None or k_lens is not None:
+        warnings.warn(
+            'Padding mask is disabled when using scaled_dot_product_attention. '
+            'It can have a significant impact on performance.'
+        )
+    
+    if q_scale is not None:
+        q = q * q_scale
+    
+    # Transpose for attention: [B, Lq, Nq, C] -> [B, Nq, Lq, C]
+    q = q.transpose(1, 2).to(compute_dtype)
+    k = k.transpose(1, 2).to(compute_dtype)
+    v = v.transpose(1, 2).to(compute_dtype)
+    
+    # Apply scaled dot product attention
+    out = torch.nn.functional.scaled_dot_product_attention(
+        q, k, v,
+        attn_mask=None,
+        is_causal=causal,
+        dropout_p=dropout_p,
+        scale=softmax_scale
+    )
+    
+    # Transpose back: [B, Nq, Lq, C] -> [B, Lq, Nq, C]
+    out = out.transpose(1, 2).contiguous()
+    return out.to(out_dtype)
 
 
 def flash_attention(
@@ -37,6 +107,8 @@ def flash_attention(
     version=None,
 ):
     """
+    Flash attention for CUDA devices. Falls back to SDP attention for MPS/CPU.
+    
     q:              [B, Lq, Nq, C1].
     k:              [B, Lk, Nk, C1].
     v:              [B, Lk, Nk, C2]. Nq must be divisible by Nk.
@@ -49,9 +121,23 @@ def flash_attention(
     deterministic:  bool. If True, slightly slower and uses more memory.
     dtype:          torch.dtype. Apply when dtype of q/k/v is not float16/bfloat16.
     """
+    # For non-CUDA devices, use SDP attention
+    if q.device.type != 'cuda':
+        return sdp_attention(
+            q=q, k=k, v=v,
+            q_lens=q_lens, k_lens=k_lens,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            q_scale=q_scale,
+            causal=causal,
+            window_size=window_size,
+            deterministic=deterministic,
+            dtype=torch.float32 if q.device.type == 'mps' else dtype,
+        )
+    
     half_dtypes = (torch.float16, torch.bfloat16)
     assert dtype in half_dtypes
-    assert q.device.type == 'cuda' and q.size(-1) <= 256
+    assert q.size(-1) <= 256
 
     # params
     b, lq, lk, out_dtype = q.size(0), q.size(1), k.size(1), q.dtype
@@ -145,7 +231,24 @@ def attention(
     dtype=torch.bfloat16,
     fa_version=None,
 ):
-    if FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE:
+    device_type = q.device.type
+    
+    # For MPS devices, always use SDP attention with float32
+    if device_type == 'mps':
+        return sdp_attention(
+            q=q, k=k, v=v,
+            q_lens=q_lens, k_lens=k_lens,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            q_scale=q_scale,
+            causal=causal,
+            window_size=window_size,
+            deterministic=deterministic,
+            dtype=torch.float32,
+        )
+    
+    # For CUDA with flash attention available
+    if device_type == 'cuda' and (FLASH_ATTN_2_AVAILABLE or FLASH_ATTN_3_AVAILABLE):
         return flash_attention(
             q=q,
             k=k,
@@ -161,19 +264,16 @@ def attention(
             dtype=dtype,
             version=fa_version,
         )
-    else:
-        if q_lens is not None or k_lens is not None:
-            warnings.warn(
-                'Padding mask is disabled when using scaled_dot_product_attention. It can have a significant impact on performance.'
-            )
-        attn_mask = None
-
-        q = q.transpose(1, 2).to(dtype)
-        k = k.transpose(1, 2).to(dtype)
-        v = v.transpose(1, 2).to(dtype)
-
-        out = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, is_causal=causal, dropout_p=dropout_p)
-
-        out = out.transpose(1, 2).contiguous()
-        return out
+    
+    # Fallback to SDP attention for CPU and CUDA without flash attention
+    return sdp_attention(
+        q=q, k=k, v=v,
+        q_lens=q_lens, k_lens=k_lens,
+        dropout_p=dropout_p,
+        softmax_scale=softmax_scale,
+        q_scale=q_scale,
+        causal=causal,
+        window_size=window_size,
+        deterministic=deterministic,
+        dtype=dtype,
+    )

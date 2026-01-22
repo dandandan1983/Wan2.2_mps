@@ -116,7 +116,7 @@ def _parse_args():
     parser.add_argument(
         "--size",
         type=str,
-        default="1280*720",
+        default="1280*704",
         choices=list(SIZE_CONFIGS.keys()),
         help="The area (width*height) of the generated video. For the I2V task, the aspect ratio of the output video will follow that of the input image."
     )
