@@ -10,7 +10,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from einops import rearrange
 
-from ...utils.device import autocast_decorator, autocast
+from ...utils.device import autocast_decorator, autocast, to_high_precision
 from ...distributed.sequence_parallel import (
     distributed_attention,
     gather_forward,
@@ -65,7 +65,7 @@ def rope_apply(x, grid_sizes, freqs, start=None):
     output = []
     for i, _ in enumerate(x):
         s = x.size(1)
-        x_i = torch.view_as_complex(x[i, :s].to(torch.float64).reshape(
+        x_i = torch.view_as_complex(to_high_precision(x[i, :s]).reshape(
             s, n, -1, 2))
         freqs_i = freqs[i, :s]
         # apply rotary embedding
@@ -84,7 +84,7 @@ def rope_apply_usp(x, grid_sizes, freqs):
     for i, _ in enumerate(x):
         s = x.size(1)
         # precompute multipliers
-        x_i = torch.view_as_complex(x[i, :s].to(torch.float64).reshape(
+        x_i = torch.view_as_complex(to_high_precision(x[i, :s]).reshape(
             s, n, -1, 2))
         freqs_i = freqs[i]
         freqs_i_rank = freqs_i
@@ -506,8 +506,8 @@ class WanModel_S2V(ModelMixin, ConfigMixin):
         if freqs.device != device:
             freqs = freqs.to(device)
         if self.trainable_token_pos_emb:
-            with autocast(dtype=torch.float64):
-                token_freqs = self.token_freqs.to(torch.float64)
+            with autocast(dtype=torch.float32):
+                token_freqs = self.token_freqs.to(torch.float32)
                 token_freqs = token_freqs / token_freqs.norm(
                     dim=-1, keepdim=True)
                 freqs = [freqs, torch.view_as_complex(token_freqs)]

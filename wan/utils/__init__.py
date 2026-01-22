@@ -13,6 +13,9 @@ from .device import (
     is_mps_available,
     empty_cache,
     synchronize,
+    get_high_precision_dtype,
+    to_high_precision,
+    get_optimal_dtype,
 )
 
 __all__ = [
@@ -20,4 +23,5 @@ __all__ = [
     'FlowDPMSolverMultistepScheduler', 'FlowUniPCMultistepScheduler',
     'get_device', 'get_device_type', 'get_best_device',
     'is_cuda_available', 'is_mps_available', 'empty_cache', 'synchronize',
+    'get_high_precision_dtype', 'to_high_precision', 'get_optimal_dtype',
 ]

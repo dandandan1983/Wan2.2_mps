@@ -2,6 +2,8 @@
 import numpy as np
 import torch
 
+from ...utils.device import to_high_precision
+
 
 def rope_precompute(x, grid_sizes, freqs, start=None):
     b, s, n, c = x.size(0), x.size(1), x.size(2), x.size(3) // 2
@@ -14,7 +16,7 @@ def rope_precompute(x, grid_sizes, freqs, start=None):
 
     # loop over samples
     output = torch.view_as_complex(x.detach().reshape(b, s, n, -1,
-                                                      2).to(torch.float64))
+                                                      2).to(to_high_precision(x).dtype))
     seq_bucket = [0]
     if not type(grid_sizes) is list:
         grid_sizes = [grid_sizes]

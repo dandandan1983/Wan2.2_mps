@@ -21,6 +21,8 @@ __all__ = [
     'synchronize',
     'get_optimal_dtype',
     'get_generator',
+    'get_high_precision_dtype',
+    'to_high_precision',
 ]
 
 
@@ -279,3 +281,45 @@ def get_generator(device: torch.device = None, seed: int = None) -> torch.Genera
         gen.manual_seed(seed)
     
     return gen
+
+
+def get_high_precision_dtype(device: torch.device = None) -> torch.dtype:
+    """
+    Get the highest precision dtype supported by the device.
+    
+    MPS doesn't support float64, so we use float32 instead.
+    CUDA and CPU support float64.
+    
+    Args:
+        device: Target device (if None, uses best available)
+        
+    Returns:
+        torch.dtype: float64 for CUDA/CPU, float32 for MPS
+    """
+    if device is None:
+        device_type = get_device_type()
+    else:
+        device_type = device.type if isinstance(device, torch.device) else str(device).split(':')[0]
+    
+    if device_type == 'mps':
+        return torch.float32
+    else:
+        return torch.float64
+
+
+def to_high_precision(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Convert tensor to highest precision supported by its device.
+    
+    MPS tensors are converted to float32, others to float64.
+    
+    Args:
+        tensor: Input tensor
+        
+    Returns:
+        torch.Tensor: Tensor in highest supported precision
+    """
+    if tensor.device.type == 'mps':
+        return tensor.to(torch.float32)
+    else:
+        return tensor.to(torch.float64)

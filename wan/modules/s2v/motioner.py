@@ -9,7 +9,7 @@ from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.utils import BaseOutput, is_torch_version
 from einops import rearrange, repeat
 
-from ...utils.device import autocast_decorator, get_best_device
+from ...utils.device import autocast_decorator, get_best_device, to_high_precision
 from ..model import flash_attention
 from .s2v_utils import rope_precompute
 
@@ -18,7 +18,7 @@ def sinusoidal_embedding_1d(dim, position):
     # preprocess
     assert dim % 2 == 0
     half = dim // 2
-    position = position.type(torch.float64)
+    position = to_high_precision(position)
 
     # calculation
     sinusoid = torch.outer(
@@ -33,7 +33,7 @@ def rope_params(max_seq_len, dim, theta=10000):
     freqs = torch.outer(
         torch.arange(max_seq_len),
         1.0 / torch.pow(theta,
-                        torch.arange(0, dim, 2).to(torch.float64).div(dim)))
+                        torch.arange(0, dim, 2).to(torch.float32).div(dim)))
     freqs = torch.polar(torch.ones_like(freqs), freqs)
     return freqs
 
@@ -104,7 +104,7 @@ def rope_apply(x, grid_sizes, freqs, start=None):
                 # precompute multipliers
                 x_i = torch.view_as_complex(
                     x[i, seq_bucket[-1]:seq_bucket[-1] + seq_len].to(
-                        torch.float64).reshape(seq_len, n, -1, 2))
+                        torch.float32).reshape(seq_len, n, -1, 2))
                 x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
                 output[i, seq_bucket[-1]:seq_bucket[-1] + seq_len] = x_i
         seq_bucket.append(seq_bucket[-1] + seq_len)
@@ -510,8 +510,8 @@ class MotionerTransformers(nn.Module, PeftAdapterMixin):
 
         if self.trainable_token_pos_emb:
             from ...utils.device import autocast
-            with autocast(dtype=torch.float64):
-                token_freqs = self.token_freqs.to(torch.float64)
+            with autocast(dtype=torch.float32):
+                token_freqs = self.token_freqs.to(torch.float32)
                 token_freqs = token_freqs / token_freqs.norm(
                     dim=-1, keepdim=True)
                 freqs = [freqs, torch.view_as_complex(token_freqs)]
