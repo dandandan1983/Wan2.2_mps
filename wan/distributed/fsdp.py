@@ -42,4 +42,9 @@ def free_model(model):
             _free_storage(m._handle.flat_param.data)
     del model
     gc.collect()
-    torch.cuda.empty_cache()
+    # Device-aware cache clearing
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch.mps, 'empty_cache'):
+            torch.mps.empty_cache()

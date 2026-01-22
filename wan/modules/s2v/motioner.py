@@ -4,12 +4,12 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import torch
-import torch.cuda.amp as amp
 import torch.nn as nn
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.utils import BaseOutput, is_torch_version
 from einops import rearrange, repeat
 
+from ...utils.device import autocast_decorator, get_best_device
 from ..model import flash_attention
 from .s2v_utils import rope_precompute
 
@@ -27,7 +27,7 @@ def sinusoidal_embedding_1d(dim, position):
     return x
 
 
-@amp.autocast(enabled=False)
+@autocast_decorator(enabled=False)
 def rope_params(max_seq_len, dim, theta=10000):
     assert dim % 2 == 0
     freqs = torch.outer(
@@ -38,7 +38,7 @@ def rope_params(max_seq_len, dim, theta=10000):
     return freqs
 
 
-@amp.autocast(enabled=False)
+@autocast_decorator(enabled=False)
 def rope_apply(x, grid_sizes, freqs, start=None):
     n, c = x.size(2), x.size(3) // 2
 
@@ -509,7 +509,8 @@ class MotionerTransformers(nn.Module, PeftAdapterMixin):
             freqs = freqs.to(device)
 
         if self.trainable_token_pos_emb:
-            with amp.autocast(dtype=torch.float64):
+            from ...utils.device import autocast
+            with autocast(dtype=torch.float64):
                 token_freqs = self.token_freqs.to(torch.float64)
                 token_freqs = token_freqs / token_freqs.norm(
                     dim=-1, keepdim=True)
@@ -783,7 +784,8 @@ def sample_indices(N, stride, expand_ratio, c):
 
 
 if __name__ == '__main__':
-    device = "cuda"
+    from wan.utils.device import get_best_device
+    device = get_best_device()
     model = FramePackMotioner(inner_dim=1024)
     batch_size = 2
     num_frame, height, width = (28, 32, 32)

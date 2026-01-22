@@ -1,7 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import torch
-import torch.cuda.amp as amp
 
+from ..utils.device import autocast_decorator, autocast
 from ..modules.model import sinusoidal_embedding_1d
 from .ulysses import distributed_attention
 from .util import gather_forward, get_rank, get_world_size
@@ -20,7 +20,7 @@ def pad_freqs(original_tensor, target_len):
     return padded_tensor
 
 
-@torch.amp.autocast('cuda', enabled=False)
+@autocast_decorator(enabled=False)
 def rope_apply(x, grid_sizes, freqs):
     """
     x:          [B, L, N, C].
@@ -99,7 +99,7 @@ def sp_dit_forward(
     # time embeddings
     if t.dim() == 1:
         t = t.expand(t.size(0), seq_len)
-    with torch.amp.autocast('cuda', dtype=torch.float32):
+    with autocast():
         bt = t.size(0)
         t = t.flatten()
         e = self.time_embedding(

@@ -12,7 +12,6 @@ from functools import partial
 
 import numpy as np
 import torch
-import torch.cuda.amp as amp
 import torch.distributed as dist
 import torchvision.transforms.functional as TF
 from decord import VideoReader

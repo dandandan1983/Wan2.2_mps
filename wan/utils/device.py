@@ -12,6 +12,13 @@ __all__ = [
     'is_cuda_available',
     'get_best_device',
     'to_device',
+    'get_autocast_device_type',
+    'autocast_context',
+    'autocast_decorator',
+    'autocast',
+    'get_device_type_from_tensor',
+    'empty_cache',
+    'synchronize',
 ]
 
 
@@ -99,6 +106,76 @@ def get_autocast_device_type() -> str:
         str: Device type for autocast ('cuda', 'mps', or 'cpu')
     """
     return get_device_type()
+
+
+def autocast_context(dtype=None, enabled=True):
+    """
+    Create a device-agnostic autocast context manager.
+    
+    Args:
+        dtype: Data type for autocast (e.g., torch.float16, torch.bfloat16)
+        enabled: Whether autocast is enabled
+        
+    Returns:
+        torch.amp.autocast context manager
+    """
+    device_type = get_device_type()
+    if dtype is not None:
+        return torch.amp.autocast(device_type=device_type, dtype=dtype, enabled=enabled)
+    else:
+        return torch.amp.autocast(device_type=device_type, enabled=enabled)
+
+
+def autocast_decorator(enabled=True):
+    """
+    Device-agnostic autocast decorator for functions.
+    
+    Args:
+        enabled: Whether autocast is enabled
+        
+    Returns:
+        Decorator function
+    """
+    import functools
+    
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            device_type = get_device_type()
+            with torch.amp.autocast(device_type=device_type, enabled=enabled):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def get_device_type_from_tensor(tensor):
+    """
+    Get the device type string from a tensor.
+    
+    Args:
+        tensor: PyTorch tensor
+        
+    Returns:
+        str: Device type ('cuda', 'mps', or 'cpu')
+    """
+    return tensor.device.type
+
+
+def autocast(dtype=torch.float32, device_type=None):
+    """
+    Device-agnostic autocast context manager.
+    Uses the best available device if device_type is not specified.
+    
+    Args:
+        dtype: Data type for autocast
+        device_type: Optional device type string ('cuda', 'mps', 'cpu')
+        
+    Returns:
+        torch.amp.autocast context manager
+    """
+    if device_type is None:
+        device_type = get_device_type()
+    return torch.amp.autocast(device_type=device_type, dtype=dtype)
 
 
 def empty_cache():

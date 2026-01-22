@@ -134,11 +134,14 @@ def load_video_frames_v2(
 def build_sam2_video_predictor(
     config_file,
     ckpt_path=None,
-    device="cuda",
+    device=None,
     mode="eval",
     hydra_overrides_extra=[],
     apply_postprocessing=True,
 ):
+    from wan.utils.device import get_best_device
+    if device is None:
+        device = get_best_device()
     hydra_overrides = [
         "++model._target_=video_predictor.SAM2VideoPredictor",
     ]

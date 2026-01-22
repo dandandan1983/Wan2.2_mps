@@ -6,12 +6,12 @@ from einops import  rearrange
 from typing import List
 import numpy as np
 import torch
-import torch.cuda.amp as amp
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.loaders import PeftAdapterMixin
 
+from ...utils.device import autocast
 from ...distributed.sequence_parallel import (
     distributed_attention,
     gather_forward,
@@ -45,7 +45,7 @@ class HeadAnimate(Head):
             e(Tensor): Shape [B, L1, C]
         """
         assert e.dtype == torch.float32
-        with amp.autocast(dtype=torch.float32):
+        with autocast():
             e = (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
             x = (self.head(self.norm(x) * (1 + e[1]) + e[0]))
         return x
@@ -204,7 +204,7 @@ class WanAnimateAttentionBlock(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
         assert e.dtype == torch.float32
-        with amp.autocast(dtype=torch.float32):
+        with autocast():
             e = (self.modulation + e).chunk(6, dim=1)
         assert e[0].dtype == torch.float32
 
@@ -212,14 +212,14 @@ class WanAnimateAttentionBlock(nn.Module):
         y = self.self_attn(
             self.norm1(x).float() * (1 + e[1]) + e[0], seq_lens, grid_sizes, freqs
         )
-        with amp.autocast(dtype=torch.float32):
+        with autocast():
             x = x + y * e[2]
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e):
             x = x + self.cross_attn(self.norm3(x), context, context_lens)
             y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
-            with amp.autocast(dtype=torch.float32):
+            with autocast():
                 x = x + y * e[5]
             return x
 
@@ -403,7 +403,7 @@ class WanAnimateModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         ])
 
         # time embeddings
-        with amp.autocast(dtype=torch.float32):
+        with autocast():
             e = self.time_embedding(
                 sinusoidal_embedding_1d(self.freq_dim, t).float()
             )

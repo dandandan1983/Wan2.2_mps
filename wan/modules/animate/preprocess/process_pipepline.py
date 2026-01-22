@@ -33,7 +33,8 @@ class ProcessPipeline():
         if sam_checkpoint_path is not None:
             self.predictor = build_sam2_video_predictor(model_cfg, sam_checkpoint_path)
         if flux_kontext_path is not None:
-            self.flux_kontext = FluxKontextPipeline.from_pretrained(flux_kontext_path, torch_dtype=torch.bfloat16).to("cuda")
+            from wan.utils.device import get_best_device
+            self.flux_kontext = FluxKontextPipeline.from_pretrained(flux_kontext_path, torch_dtype=torch.bfloat16).to(get_best_device())
 
     def __call__(self, video_path, refer_image_path, output_path, resolution_area=[1280, 720], fps=30, iterations=3, k=7, w_len=1, h_len=1, retarget_flag=False, use_flux=False, replace_flag=False):
         if replace_flag:
