@@ -2,6 +2,7 @@
 """
 Device utilities for cross-platform GPU support (CUDA, MPS, CPU).
 """
+import gc
 import logging
 import os
 import torch
@@ -27,11 +28,15 @@ __all__ = [
     'get_mps_memory_limit',
     'set_mps_memory_limit',
     'mps_memory_efficient_mode',
+    'aggressive_memory_cleanup',
+    'get_mps_recommended_settings',
+    'log_mps_memory_info',
 ]
 
 # MPS configuration - can be overridden via environment variables
-MPS_MEMORY_LIMIT_GB = float(os.environ.get('WAN_MPS_MEMORY_LIMIT_GB', '40.0'))
+MPS_MEMORY_LIMIT_GB = float(os.environ.get('WAN_MPS_MEMORY_LIMIT_GB', '8.0'))
 MPS_MEMORY_EFFICIENT = os.environ.get('WAN_MPS_MEMORY_EFFICIENT', '1') == '1'
+MPS_LOW_MEMORY_MODE = os.environ.get('WAN_MPS_LOW_MEMORY', '0') == '1'
 
 
 def is_cuda_available() -> bool:
@@ -412,3 +417,141 @@ def is_mps_memory_efficient() -> bool:
         bool: True if memory efficient mode is enabled
     """
     return MPS_MEMORY_EFFICIENT
+
+
+def aggressive_memory_cleanup():
+    """
+    Perform aggressive memory cleanup for MPS devices.
+    
+    This is essential for running large models on limited GPU memory.
+    Should be called between major operations (e.g., after each diffusion step).
+    """
+    # Force Python garbage collection
+    gc.collect()
+    
+    # Device-specific cleanup
+    if is_cuda_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    elif is_mps_available():
+        # Synchronize to ensure all operations are complete
+        if hasattr(torch.mps, 'synchronize'):
+            torch.mps.synchronize()
+        # Clear MPS cache
+        if hasattr(torch.mps, 'empty_cache'):
+            torch.mps.empty_cache()
+        # Additional garbage collection after MPS cleanup
+        gc.collect()
+
+
+def get_mps_recommended_settings(memory_gb: float = None) -> dict:
+    """
+    Get recommended settings for MPS based on available memory.
+    
+    Args:
+        memory_gb: Available memory in GB. If None, attempts to detect.
+        
+    Returns:
+        dict: Recommended settings for MPS generation
+    """
+    if memory_gb is None:
+        # Default conservative estimate for Mac
+        # Most Macs with MPS have 8-128GB unified memory
+        memory_gb = 16.0  # Conservative default
+    
+    if memory_gb <= 16:
+        return {
+            'offload_model': True,
+            't5_cpu': True,
+            'frame_num': 33,  # Reduced frames
+            'memory_limit_gb': 4.0,
+            'chunk_size': 256,
+            'low_memory': True,
+        }
+    elif memory_gb <= 32:
+        return {
+            'offload_model': True,
+            't5_cpu': True,
+            'frame_num': 49,
+            'memory_limit_gb': 8.0,
+            'chunk_size': 512,
+            'low_memory': False,
+        }
+    elif memory_gb <= 64:
+        return {
+            'offload_model': True,
+            't5_cpu': False,
+            'frame_num': 81,
+            'memory_limit_gb': 16.0,
+            'chunk_size': 1024,
+            'low_memory': False,
+        }
+    else:
+        return {
+            'offload_model': False,
+            't5_cpu': False,
+            'frame_num': 121,
+            'memory_limit_gb': 32.0,
+            'chunk_size': 2048,
+            'low_memory': False,
+        }
+
+
+def log_mps_memory_info():
+    """
+    Log MPS memory information and recommendations.
+    """
+    if not is_mps_available():
+        logging.info("MPS is not available on this system.")
+        return
+    
+    logging.info("=" * 60)
+    logging.info("Apple MPS (Metal Performance Shaders) Configuration")
+    logging.info("=" * 60)
+    logging.info(f"MPS Memory Limit: {MPS_MEMORY_LIMIT_GB:.1f} GB")
+    logging.info(f"Memory Efficient Mode: {MPS_MEMORY_EFFICIENT}")
+    logging.info(f"Low Memory Mode: {MPS_LOW_MEMORY_MODE}")
+    logging.info("")
+    logging.info("Environment Variables for Tuning:")
+    logging.info("  WAN_MPS_MEMORY_LIMIT_GB=<float>  - Max buffer size (default: 8.0)")
+    logging.info("  WAN_MPS_MEMORY_EFFICIENT=1       - Enable chunked attention")
+    logging.info("  WAN_MPS_LOW_MEMORY=1             - Enable aggressive memory saving")
+    logging.info("")
+    logging.info("Tips for Mac users:")
+    logging.info("  - Use --offload_model to move models to CPU between steps")
+    logging.info("  - Use --t5_cpu to keep T5 on CPU")
+    logging.info("  - Reduce --frame_num for less memory usage")
+    logging.info("  - Close other apps to free unified memory")
+    logging.info("=" * 60)
+
+
+def is_mps_low_memory_mode() -> bool:
+    """
+    Check if MPS low memory mode is enabled.
+    
+    Returns:
+        bool: True if low memory mode is enabled
+    """
+    return MPS_LOW_MEMORY_MODE
+
+
+def set_mps_low_memory_mode(enabled: bool = True):
+    """
+    Enable or disable MPS low memory mode.
+    
+    When enabled:
+    - More aggressive offloading
+    - Smaller chunk sizes
+    - More frequent cache clearing
+    
+    Args:
+        enabled: Whether to enable low memory mode
+    """
+    global MPS_LOW_MEMORY_MODE, MPS_MEMORY_LIMIT_GB
+    MPS_LOW_MEMORY_MODE = enabled
+    
+    if enabled:
+        MPS_MEMORY_LIMIT_GB = 2.0
+        mps_memory_efficient_mode(True)
+    else:
+        MPS_MEMORY_LIMIT_GB = 8.0

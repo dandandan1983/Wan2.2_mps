@@ -19,7 +19,7 @@ from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, SUPPORTED_SIZES, WAN_CON
 from wan.distributed.util import init_distributed_group
 from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import merge_video_audio, save_video, str2bool
-from wan.utils.device import get_device_type, is_cuda_available, is_mps_available, synchronize
+from wan.utils.device import get_device_type, is_cuda_available, is_mps_available, synchronize, log_mps_memory_info, set_mps_low_memory_mode, aggressive_memory_cleanup
 
 
 EXAMPLE_PROMPT = {
@@ -295,6 +295,19 @@ def _parse_args():
         default=80,
         help="Number of frames per clip, 48 or 80 or others (must be multiple of 4) for 14B s2v"
     )
+    # MPS-specific arguments
+    parser.add_argument(
+        "--mps_low_memory",
+        action="store_true",
+        default=False,
+        help="Enable low memory mode for MPS (Apple Silicon). Uses more aggressive memory management."
+    )
+    parser.add_argument(
+        "--mps_memory_limit",
+        type=float,
+        default=None,
+        help="Set MPS memory limit in GB. Lower values use more chunking but less memory."
+    )
     args = parser.parse_args()
     _validate_args(args)
 
@@ -320,6 +333,27 @@ def generate(args):
     device = local_rank
     device_type = get_device_type()
     _init_logging(rank)
+
+    # Configure MPS-specific settings
+    if device_type == 'mps':
+        if args.mps_low_memory:
+            set_mps_low_memory_mode(True)
+            logging.info("MPS low memory mode enabled - using aggressive memory management")
+        if args.mps_memory_limit is not None:
+            from wan.utils.device import set_mps_memory_limit
+            set_mps_memory_limit(args.mps_memory_limit)
+            logging.info(f"MPS memory limit set to {args.mps_memory_limit:.1f} GB")
+        
+        # Log MPS configuration info
+        if rank == 0:
+            log_mps_memory_info()
+        
+        # For MPS, always recommend offload_model and t5_cpu for stability
+        if args.offload_model is None:
+            args.offload_model = True
+            logging.info("MPS detected: offload_model enabled by default for memory efficiency")
+        if not args.t5_cpu:
+            logging.info("Tip: Use --t5_cpu to keep T5 encoder on CPU and save GPU memory")
 
     if args.offload_model is None:
         args.offload_model = False if world_size > 1 else True

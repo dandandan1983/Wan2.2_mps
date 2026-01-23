@@ -16,7 +16,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from .distributed.fsdp import shard_model
-from .utils.device import get_best_device, get_device_type, is_cuda_available, is_mps_available, synchronize, empty_cache
+from .utils.device import get_best_device, get_device_type, is_cuda_available, is_mps_available, synchronize, empty_cache, aggressive_memory_cleanup, is_mps_low_memory_mode
 from .distributed.sequence_parallel import sp_attn_forward, sp_dit_forward
 from .distributed.util import get_world_size
 from .modules.model import WanModel
@@ -367,7 +367,10 @@ class WanTI2V:
                 self.model.to(self.device)
                 empty_cache()
 
-            for _, t in enumerate(tqdm(timesteps)):
+            # MPS low memory mode - more aggressive cleanup
+            is_low_memory = is_mps_low_memory_mode() and self.device.type == 'mps'
+
+            for step_idx, t in enumerate(tqdm(timesteps)):
                 latent_model_input = latents
                 timestep = [t]
 
@@ -382,8 +385,12 @@ class WanTI2V:
 
                 noise_pred_cond = self.model(
                     latent_model_input, t=timestep, **arg_c)[0]
+                if is_low_memory:
+                    aggressive_memory_cleanup()
                 noise_pred_uncond = self.model(
                     latent_model_input, t=timestep, **arg_null)[0]
+                if is_low_memory:
+                    aggressive_memory_cleanup()
 
                 noise_pred = noise_pred_uncond + guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
@@ -568,7 +575,10 @@ class WanTI2V:
                 self.model.to(self.device)
                 empty_cache()
 
-            for _, t in enumerate(tqdm(timesteps)):
+            # MPS low memory mode - more aggressive cleanup
+            is_low_memory = is_mps_low_memory_mode() and self.device.type == 'mps'
+
+            for step_idx, t in enumerate(tqdm(timesteps)):
                 latent_model_input = [latent.to(self.device)]
                 timestep = [t]
 
@@ -583,12 +593,12 @@ class WanTI2V:
 
                 noise_pred_cond = self.model(
                     latent_model_input, t=timestep, **arg_c)[0]
-                if offload_model:
-                    empty_cache()
+                if offload_model or is_low_memory:
+                    aggressive_memory_cleanup() if is_low_memory else empty_cache()
                 noise_pred_uncond = self.model(
                     latent_model_input, t=timestep, **arg_null)[0]
-                if offload_model:
-                    empty_cache()
+                if offload_model or is_low_memory:
+                    aggressive_memory_cleanup() if is_low_memory else empty_cache()
                 noise_pred = noise_pred_uncond + guide_scale * (
                     noise_pred_cond - noise_pred_uncond)
 

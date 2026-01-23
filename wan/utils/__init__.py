@@ -19,6 +19,11 @@ from .device import (
     get_mps_memory_limit,
     set_mps_memory_limit,
     mps_memory_efficient_mode,
+    aggressive_memory_cleanup,
+    get_mps_recommended_settings,
+    log_mps_memory_info,
+    is_mps_low_memory_mode,
+    set_mps_low_memory_mode,
 )
 
 __all__ = [
@@ -28,4 +33,6 @@ __all__ = [
     'is_cuda_available', 'is_mps_available', 'empty_cache', 'synchronize',
     'get_high_precision_dtype', 'to_high_precision', 'get_optimal_dtype',
     'get_mps_memory_limit', 'set_mps_memory_limit', 'mps_memory_efficient_mode',
+    'aggressive_memory_cleanup', 'get_mps_recommended_settings', 'log_mps_memory_info',
+    'is_mps_low_memory_mode', 'set_mps_low_memory_mode',
 ]

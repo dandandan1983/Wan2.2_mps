@@ -123,13 +123,77 @@ This repository includes support for Apple Silicon Macs using Metal Performance 
 - ONNX-based preprocessing (pose detection) falls back to CPU on MPS
 - Memory management differs from CUDA; monitor Activity Monitor for memory usage
 
-**Example usage on Mac:**
+**Memory Requirements by Model:**
+
+| Model | Minimum Unified Memory | Recommended |
+|-------|----------------------|-------------|
+| TI2V-5B | 32GB | 48GB+ |
+| T2V/I2V-A14B | 64GB+ | 96GB+ |
+| S2V-14B | 64GB+ | 96GB+ |
+
+**MPS-Specific Command Line Options:**
+
 ```sh
-# The script will automatically detect MPS and use it
-python generate.py --task ti2v-5B --size 1280*704 --ckpt_dir ./Wan2.2-TI2V-5B --offload_model True --t5_cpu --prompt "A cat playing piano"
+# Enable low memory mode (aggressive memory cleanup)
+--mps_low_memory
+
+# Set memory limit for chunked attention (in GB)
+--mps_memory_limit 4.0
 ```
 
-> 💡 For best performance on Apple Silicon, use the TI2V-5B model which is designed to run on consumer-grade hardware.
+**Environment Variables for MPS Tuning:**
+
+```sh
+# Set maximum buffer size for attention (default: 8.0 GB)
+export WAN_MPS_MEMORY_LIMIT_GB=4.0
+
+# Enable memory efficient mode (chunked attention)
+export WAN_MPS_MEMORY_EFFICIENT=1
+
+# Enable low memory mode (aggressive cleanup)
+export WAN_MPS_LOW_MEMORY=1
+```
+
+**Example usage on Mac (16GB-32GB RAM):**
+```sh
+# Low memory configuration - reduce frame count and use aggressive memory management
+WAN_MPS_LOW_MEMORY=1 python generate.py --task ti2v-5B --size 704*1280 \
+    --ckpt_dir ./Wan2.2-TI2V-5B --offload_model True --t5_cpu \
+    --frame_num 33 --mps_low_memory \
+    --prompt "A cat playing piano"
+```
+
+**Example usage on Mac (48GB+ RAM):**
+```sh
+python generate.py --task ti2v-5B --size 1280*704 \
+    --ckpt_dir ./Wan2.2-TI2V-5B --offload_model True --t5_cpu \
+    --prompt "A cat playing piano"
+```
+
+**Troubleshooting MPS Issues:**
+
+1. **Process killed / Out of Memory:**
+   - Reduce `--frame_num` (try 33 or 49 instead of 81)
+   - Use `--mps_low_memory` flag
+   - Use `--t5_cpu` to keep the T5 encoder on CPU
+   - Close other applications to free unified memory
+   - Set `WAN_MPS_MEMORY_LIMIT_GB=2.0` for smaller buffers
+
+2. **Slow generation:**
+   - MPS is inherently slower than CUDA for this workload
+   - Use smaller resolutions: `--size 704*1280` instead of `1280*720`
+   - Reduce `--sample_steps` (try 30 instead of 50)
+
+3. **Semaphore leak warning:**
+   - This is a known PyTorch issue on macOS
+   - Usually harmless; can be ignored
+   - If problematic, restart Python between runs
+
+4. **Invalid buffer size error:**
+   - Reduce `WAN_MPS_MEMORY_LIMIT_GB` to a smaller value
+   - Enable `WAN_MPS_MEMORY_EFFICIENT=1`
+
+> 💡 For best performance on Apple Silicon, use the **TI2V-5B model** which is designed to run on consumer-grade hardware. The 14B models require significantly more memory.
 
 
 #### Model Download
