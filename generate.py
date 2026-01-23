@@ -94,6 +94,14 @@ def _validate_args(args):
     if args.frame_num is None:
         args.frame_num = cfg.frame_num
 
+    # MPS low memory mode: reduce frame_num if too high
+    if is_mps_available():
+        from wan.utils.device import is_mps_low_memory_mode
+        if is_mps_low_memory_mode() and args.frame_num > 33:
+            logging.warning(f"MPS low memory mode: Reducing frame_num from {args.frame_num} to 33 frames")
+            logging.warning("To use more frames, disable low memory mode or increase memory limit")
+            args.frame_num = 33  # 33 frames is more manageable for low memory
+
     args.base_seed = args.base_seed if args.base_seed >= 0 else random.randint(
         0, sys.maxsize)
     # Size check

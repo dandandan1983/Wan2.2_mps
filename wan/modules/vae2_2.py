@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from ..utils.device import autocast
+from ..utils.device import autocast, is_mps_available, is_mps_low_memory_mode, aggressive_memory_cleanup
 
 __all__ = [
     "Wan2_2_VAE",
@@ -819,6 +819,11 @@ class WanVAE_(nn.Module):
             z = z / scale[1] + scale[0]
         iter_ = z.shape[2]
         x = self.conv2(z)
+        
+        # Check if we should use MPS low memory mode
+        is_mps = x.device.type == 'mps'
+        use_low_memory = is_mps and is_mps_low_memory_mode()
+        
         for i in range(iter_):
             self._conv_idx = [0]
             if i == 0:
@@ -835,8 +840,18 @@ class WanVAE_(nn.Module):
                     feat_idx=self._conv_idx,
                 )
                 out = torch.cat([out, out_], 2)
+                del out_  # Free memory immediately
+            
+            # Memory cleanup for MPS low memory mode
+            if use_low_memory and (i % 2 == 0 or i == iter_ - 1):
+                aggressive_memory_cleanup()
+                
         out = unpatchify(out, patch_size=2)
         self.clear_cache()
+        
+        if use_low_memory:
+            aggressive_memory_cleanup()
+            
         return out
 
     def reparameterize(self, mu, log_var):
@@ -1040,13 +1055,34 @@ class Wan2_2_VAE:
         try:
             if not isinstance(zs, list):
                 raise TypeError("zs should be a list")
+            
+            # Check if we're on MPS with low memory mode
+            device = next(self.model.parameters()).device if hasattr(self.model, 'parameters') else None
+            is_mps_device = device is not None and device.type == 'mps'
+            use_low_memory = is_mps_device and is_mps_low_memory_mode()
+            
+            if use_low_memory:
+                logging.info(f"VAE decode: Using MPS low-memory mode for {len(zs)} latent(s)")
+                # Force memory cleanup before decode
+                aggressive_memory_cleanup()
+                
             with autocast(dtype=self.dtype):
-                return [
-                    self.model.decode(u.unsqueeze(0),
-                                      self.scale).float().clamp_(-1,
-                                                                 1).squeeze(0)
-                    for u in zs
-                ]
+                results = []
+                for i, u in enumerate(zs):
+                    if use_low_memory:
+                        # Log progress for long decodes
+                        logging.info(f"VAE decode: Processing latent {i+1}/{len(zs)}")
+                    
+                    # Decode single latent
+                    decoded = self.model.decode(u.unsqueeze(0), self.scale)
+                    decoded = decoded.float().clamp_(-1, 1).squeeze(0)
+                    results.append(decoded)
+                    
+                    if use_low_memory:
+                        # Aggressive memory cleanup between frames
+                        aggressive_memory_cleanup()
+                
+                return results
         except TypeError as e:
             logging.info(e)
             return None

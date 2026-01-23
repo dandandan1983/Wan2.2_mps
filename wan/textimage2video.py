@@ -407,6 +407,11 @@ class WanTI2V:
                 self.model.cpu()
                 synchronize()
                 empty_cache()
+            
+            # Extra memory cleanup for MPS before VAE decode
+            if self.device.type == 'mps':
+                aggressive_memory_cleanup()
+                
             if self.rank == 0:
                 videos = self.vae.decode(x0)
 
@@ -618,6 +623,10 @@ class WanTI2V:
                 self.model.cpu()
                 synchronize()
                 empty_cache()
+
+            # Extra memory cleanup for MPS before VAE decode
+            if self.device.type == 'mps':
+                aggressive_memory_cleanup()
 
             if self.rank == 0:
                 videos = self.vae.decode(x0)

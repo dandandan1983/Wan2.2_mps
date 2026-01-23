@@ -173,23 +173,33 @@ python generate.py --task ti2v-5B --size 1280*704 \
 **Troubleshooting MPS Issues:**
 
 1. **Process killed / Out of Memory:**
-   - Reduce `--frame_num` (try 33 or 49 instead of 81)
-   - Use `--mps_low_memory` flag
+   - **First**: Use `--mps_low_memory` flag - this enables aggressive memory management
+   - Reduce `--frame_num` to 33 (or 17 for very low memory). Note: Low memory mode auto-reduces to 33 frames.
+   - Use smaller resolution: `--size 480*832` instead of higher resolutions
    - Use `--t5_cpu` to keep the T5 encoder on CPU
    - Close other applications to free unified memory
-   - Set `WAN_MPS_MEMORY_LIMIT_GB=2.0` for smaller buffers
+   - Set `WAN_MPS_MEMORY_LIMIT_GB=4.0` for smaller buffers
+   - Monitor memory with Activity Monitor during generation
 
-2. **Slow generation:**
+2. **Recommended command for 8GB unified memory Macs:**
+   ```bash
+   python generate.py --task ti2v-5B --size 480*832 --ckpt_dir ./Wan2.2-TI2V-5B \
+       --offload_model True --t5_cpu --mps_low_memory --frame_num 17 \
+       --sample_steps 20 --prompt "your prompt here"
+   ```
+
+3. **Slow generation:**
    - MPS is inherently slower than CUDA for this workload
-   - Use smaller resolutions: `--size 704*1280` instead of `1280*720`
-   - Reduce `--sample_steps` (try 30 instead of 50)
+   - Use smaller resolutions: `--size 480*832` or `--size 704*1280`
+   - Reduce `--sample_steps` (try 20 instead of 40)
+   - Fewer frames means faster generation
 
-3. **Semaphore leak warning:**
+4. **Semaphore leak warning:**
    - This is a known PyTorch issue on macOS
    - Usually harmless; can be ignored
    - If problematic, restart Python between runs
 
-4. **Invalid buffer size error:**
+5. **Invalid buffer size error:**
    - Reduce `WAN_MPS_MEMORY_LIMIT_GB` to a smaller value
    - Enable `WAN_MPS_MEMORY_EFFICIENT=1`
 
