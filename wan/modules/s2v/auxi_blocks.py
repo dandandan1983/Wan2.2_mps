@@ -11,6 +11,8 @@ from diffusers.models import ModelMixin
 from diffusers.utils import is_torch_version, logging
 from einops import rearrange
 
+from ...utils.device import get_device_type, is_mps_available
+
 try:
     from flash_attn import flash_attn_func, flash_attn_qkvpacked_func
 except ImportError:
@@ -66,13 +68,30 @@ def attention(
         torch.Tensor: Output tensor after self attention with shape [b, s, ad]
     """
     pre_attn_layout, post_attn_layout = MEMORY_LAYOUT[mode]
+    device_type = q.device.type
+
+    # For MPS, force torch mode as flash attention is not available
+    if device_type == 'mps' and mode == 'flash':
+        mode = 'torch'
+        pre_attn_layout, post_attn_layout = MEMORY_LAYOUT[mode]
+        # Need to transpose for torch mode
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
 
     if mode == "torch":
         if attn_mask is not None and attn_mask.dtype != torch.bool:
             attn_mask = attn_mask.to(q.dtype)
+        # Use float32 for MPS stability
+        compute_dtype = torch.float32 if device_type == 'mps' else q.dtype
+        out_dtype = q.dtype
         x = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal)
+            q.to(compute_dtype), k.to(compute_dtype), v.to(compute_dtype), 
+            attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal)
+        x = x.to(out_dtype)
     elif mode == "flash":
+        if flash_attn_func is None:
+            raise ImportError("flash_attn is not installed. Please install it or use mode='torch'.")
         x = flash_attn_func(
             q,
             k,

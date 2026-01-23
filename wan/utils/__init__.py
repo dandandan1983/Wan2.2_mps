@@ -16,6 +16,9 @@ from .device import (
     get_high_precision_dtype,
     to_high_precision,
     get_optimal_dtype,
+    get_mps_memory_limit,
+    set_mps_memory_limit,
+    mps_memory_efficient_mode,
 )
 
 __all__ = [
@@ -24,4 +27,5 @@ __all__ = [
     'get_device', 'get_device_type', 'get_best_device',
     'is_cuda_available', 'is_mps_available', 'empty_cache', 'synchronize',
     'get_high_precision_dtype', 'to_high_precision', 'get_optimal_dtype',
+    'get_mps_memory_limit', 'set_mps_memory_limit', 'mps_memory_efficient_mode',
 ]

@@ -3,6 +3,7 @@
 Device utilities for cross-platform GPU support (CUDA, MPS, CPU).
 """
 import logging
+import os
 import torch
 
 __all__ = [
@@ -23,7 +24,14 @@ __all__ = [
     'get_generator',
     'get_high_precision_dtype',
     'to_high_precision',
+    'get_mps_memory_limit',
+    'set_mps_memory_limit',
+    'mps_memory_efficient_mode',
 ]
+
+# MPS configuration - can be overridden via environment variables
+MPS_MEMORY_LIMIT_GB = float(os.environ.get('WAN_MPS_MEMORY_LIMIT_GB', '40.0'))
+MPS_MEMORY_EFFICIENT = os.environ.get('WAN_MPS_MEMORY_EFFICIENT', '1') == '1'
 
 
 def is_cuda_available() -> bool:
@@ -334,3 +342,73 @@ def to_high_precision(tensor: torch.Tensor) -> torch.Tensor:
         return tensor.to(torch.float32)
     else:
         return tensor.to(torch.float64)
+
+
+def get_mps_memory_limit() -> float:
+    """
+    Get the current MPS memory limit in GB.
+    
+    This is used by chunked attention to determine chunk sizes.
+    Can be configured via WAN_MPS_MEMORY_LIMIT_GB environment variable.
+    
+    Returns:
+        float: Memory limit in GB
+    """
+    return MPS_MEMORY_LIMIT_GB
+
+
+def set_mps_memory_limit(limit_gb: float):
+    """
+    Set the MPS memory limit in GB.
+    
+    This controls the maximum buffer size for attention operations.
+    Lower values will result in more chunking but lower memory usage.
+    
+    Args:
+        limit_gb: Memory limit in GB (recommended: 2.0-8.0)
+    """
+    global MPS_MEMORY_LIMIT_GB
+    MPS_MEMORY_LIMIT_GB = limit_gb
+
+
+def mps_memory_efficient_mode(enabled: bool = True):
+    """
+    Enable or disable memory efficient mode for MPS.
+    
+    When enabled:
+    - Uses chunked attention for large sequences
+    - More aggressive cache clearing
+    - May be slower but uses less memory
+    
+    Args:
+        enabled: Whether to enable memory efficient mode
+    """
+    global MPS_MEMORY_EFFICIENT
+    MPS_MEMORY_EFFICIENT = enabled
+    
+    if enabled:
+        # Set a conservative memory limit
+        set_mps_memory_limit(2.0)
+    else:
+        # Use a more generous limit
+        set_mps_memory_limit(4.0)
+
+
+def get_mps_fallback_device() -> torch.device:
+    """
+    Get the fallback device for operations not supported on MPS.
+    
+    Returns:
+        torch.device: CPU device for fallback operations
+    """
+    return torch.device('cpu')
+
+
+def is_mps_memory_efficient() -> bool:
+    """
+    Check if MPS memory efficient mode is enabled.
+    
+    Returns:
+        bool: True if memory efficient mode is enabled
+    """
+    return MPS_MEMORY_EFFICIENT
